@@ -56,6 +56,7 @@ The current firmware is a standalone ESP32 dashboard. It joins the configured ho
    ```sh
    WIFI_SSID=your-network-name
    WIFI_PASSWORD=your-network-password
+   MILLUBOARD_API_TOKEN=use-a-long-random-token-here
    ```
 
 2. Upload the firmware with `pio run --target upload`.
@@ -65,12 +66,19 @@ Shell environment variables with the same names override `.env`, which is useful
 
 If the ESP32 cannot join the configured network within 15 seconds, join its **MilluBoard** fallback network using password `milluboard`, then open `http://192.168.4.1`.
 
-The dashboard reports live chip status, counts unique dashboard clients active within the last 30 seconds, stores a temporary message, and toggles the common GPIO 2 onboard LED. Its experimental endpoints are:
+The dashboard reports live chip status, counts unique dashboard clients active within the last 30 seconds, stores a temporary message, and toggles the common GPIO 2 onboard LED. API endpoints require a bearer token. Interactive Scalar documentation is available at `http://milluboard.local/docs`, with the OpenAPI document at `/openapi.json`.
 
 ```text
-GET  /api/status
-POST /api/message   (text/plain body, 1-80 characters)
-POST /api/led
+GET  /api/v1/status
+POST /api/v1/display/message   (text/plain body, 1-80 characters)
+POST /api/v1/led
+```
+
+Send the token with every API request:
+
+```sh
+curl -H "Authorization: Bearer $MILLUBOARD_API_TOKEN" \
+  http://milluboard.local/api/v1/status
 ```
 
 ## Hardware

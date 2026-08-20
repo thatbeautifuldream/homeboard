@@ -10,11 +10,16 @@
 #ifndef WIFI_PASSWORD
 #error "WIFI_PASSWORD must be supplied by the PlatformIO build environment"
 #endif
+#ifndef MILLUBOARD_API_TOKEN
+#error "MILLUBOARD_API_TOKEN must be supplied by the PlatformIO build environment"
+#endif
 
 namespace {
 constexpr char kDeviceName[] = "MilluBoard";
 constexpr char kHostName[] = "milluboard";
 constexpr char kAccessPointPassword[] = "milluboard";
+constexpr char kApiToken[] = MILLUBOARD_API_TOKEN;
+constexpr char kApiVersion[] = "v1";
 constexpr uint8_t kLedPin = 2;
 
 WebServer server(80);
@@ -47,9 +52,31 @@ const char kPage[] PROGMEM = R"HTML(
 <script>
 const $=id=>document.getElementById(id);const formatUptime=ms=>{const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m ${s%60}s`};
 function connection(ok){$('connection-text').textContent=ok?'Online':'Offline';$('connection-dot').classList.toggle('bg-white',ok);$('connection-dot').classList.toggle('bg-zinc-600',!ok)}
-async function refresh(){try{const s=await fetch('/api/status',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error();return r.json()});$('message').textContent=s.message;$('uptime').textContent=formatUptime(s.uptime_ms);$('heap').textContent=Math.round(s.free_heap/1024)+' KB';$('clients').textContent=s.clients;$('led').textContent=s.led?'On':'Off';$('led-description').textContent=s.led?'Currently on.':'Currently off.';$('led-button').setAttribute('aria-pressed',s.led);$('network-address').textContent=s.ip+' · '+s.hostname;connection(true)}catch(e){connection(false)}}
-$('refresh-button').addEventListener('click',refresh);$('message-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('message-button');button.disabled=true;$('form-status').textContent='Saving...';try{await fetch('/api/message',{method:'POST',headers:{'Content-Type':'text/plain'},body:$('message-input').value});$('message-input').value='';$('form-status').textContent='Saved.';await refresh()}catch(e){$('form-status').textContent='Could not save.'}finally{button.disabled=false}});$('led-button').addEventListener('click',async()=>{await fetch('/api/led',{method:'POST'});refresh()});refresh();setInterval(refresh,10000);
+const api=async(path,options={})=>{let token=localStorage.getItem('milluboard-api-token')||prompt('MilluBoard API token');if(token)localStorage.setItem('milluboard-api-token',token);const headers={...(options.headers||{}),Authorization:`Bearer ${token}`};const response=await fetch(path,{...options,headers});if(response.status===401){localStorage.removeItem('milluboard-api-token');throw Error('Unauthorized')}return response};
+async function refresh(){try{const s=await api('/api/v1/status',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error();return r.json()});$('message').textContent=s.message;$('uptime').textContent=formatUptime(s.uptime_ms);$('heap').textContent=Math.round(s.free_heap/1024)+' KB';$('clients').textContent=s.clients;$('led').textContent=s.led?'On':'Off';$('led-description').textContent=s.led?'Currently on.':'Currently off.';$('led-button').setAttribute('aria-pressed',s.led);$('network-address').textContent=s.ip+' · '+s.hostname;connection(true)}catch(e){connection(false)}}
+$('refresh-button').addEventListener('click',refresh);$('message-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('message-button');button.disabled=true;$('form-status').textContent='Saving...';try{await api('/api/v1/display/message',{method:'POST',headers:{'Content-Type':'text/plain'},body:$('message-input').value});$('message-input').value='';$('form-status').textContent='Saved.';await refresh()}catch(e){$('form-status').textContent='Could not save.'}finally{button.disabled=false}});$('led-button').addEventListener('click',async()=>{await api('/api/v1/led',{method:'POST'});refresh()});refresh();setInterval(refresh,10000);
 </script></body></html>)HTML";
+
+const char kOpenApi[] PROGMEM = R"JSON({"openapi":"3.0.3","info":{"title":"MilluBoard API","version":"1.0.0","description":"Authenticated local HTTP API for MilluBoard."},"servers":[{"url":"http://milluboard.local"}],"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"API token"}},"schemas":{"MessageRequest":{"type":"string","minLength":1,"maxLength":80}}},"security":[{"bearerAuth":[]}],"paths":{"/api/v1/status":{"get":{"summary":"Get device status","responses":{"200":{"description":"Current status"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/display/message":{"post":{"summary":"Set a persistent display message","requestBody":{"required":true,"content":{"text/plain":{"schema":{"$ref":"#/components/schemas/MessageRequest"}}}},"responses":{"200":{"description":"Updated status"},"400":{"description":"Invalid message"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/led":{"post":{"summary":"Toggle the onboard LED","responses":{"200":{"description":"Updated status"},"401":{"description":"Missing or invalid token"}}}}}})JSON";
+const char kDocsPage[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8"><title>MilluBoard API Docs</title></head><body><script id="api-reference" data-url="/openapi.json"></script><script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script></body></html>)HTML";
+
+bool authorized() {
+  const String header = server.header("Authorization");
+  const String expected = String("Bearer ") + kApiToken;
+  if (header == expected) return true;
+  server.sendHeader("WWW-Authenticate", "Bearer");
+  server.send(401, "application/json", "{\"error\":\"unauthorized\"}");
+  return false;
+}
+
+bool validTextBody(String &value) {
+  if (server.hasHeader("Content-Length") && server.header("Content-Length").toInt() > 80) return false;
+  if (server.header("Content-Type") != "text/plain") return false;
+  value = server.arg("plain");
+  if (value.length() < 1 || value.length() > 80) return false;
+  for (const char character : value) if (static_cast<uint8_t>(character) < 0x20 && character != '\n' && character != '\r' && character != '\t') return false;
+  return true;
+}
 
 uint8_t trackDashboardClient() {
   const uint32_t now = millis();
@@ -102,17 +129,23 @@ void sendJsonStatus() {
 
 void configureRoutes() {
   server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", kPage); });
-  server.on("/api/status", HTTP_GET, sendJsonStatus);
-  server.on("/api/message", HTTP_POST, [] {
-    const String nextMessage = server.arg("plain");
-    if (nextMessage.isEmpty() || nextMessage.length() > 80) {
+  server.on("/docs", HTTP_GET, [] { server.send_P(200, "text/html", kDocsPage); });
+  server.on("/openapi.json", HTTP_GET, [] { server.send_P(200, "application/json", kOpenApi); });
+  server.on("/api/v1/status", HTTP_GET, [] {
+    if (authorized()) sendJsonStatus();
+  });
+  server.on("/api/v1/display/message", HTTP_POST, [] {
+    if (!authorized()) return;
+    String nextMessage;
+    if (!validTextBody(nextMessage)) {
       server.send(400, "application/json", "{\"error\":\"message must contain 1-80 characters\"}");
       return;
     }
     boardMessage = nextMessage;
     sendJsonStatus();
   });
-  server.on("/api/led", HTTP_POST, [] {
+  server.on("/api/v1/led", HTTP_POST, [] {
+    if (!authorized()) return;
     ledOn = !ledOn;
     digitalWrite(kLedPin, ledOn ? HIGH : LOW);
     sendJsonStatus();
@@ -123,6 +156,8 @@ void configureRoutes() {
 
 void setup() {
   Serial.begin(115200);
+  const char *requiredHeaders[] = {"Authorization", "Content-Type", "Content-Length"};
+  server.collectHeaders(requiredHeaders, 3);
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, LOW);
   WiFi.mode(WIFI_STA);
