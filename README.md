@@ -47,7 +47,31 @@ The personal device name is **MilluBoard**. A future networking milestone will a
 
 ## Project status
 
-**Early development.** The current firmware only starts serial communication and prints a startup message. Wi-Fi, mDNS, the web interface, API, and display support are planned but not yet implemented.
+The current firmware is a standalone ESP32 dashboard. It joins the configured home Wi-Fi, advertises `milluboard.local` over mDNS, and serves a small web UI and JSON API. If the home network is unavailable, it creates a fallback access point named **MilluBoard**. Display support is planned but not yet implemented.
+
+### Try it
+
+1. Create a local `.env` file (already ignored by Git):
+
+   ```sh
+   WIFI_SSID=your-network-name
+   WIFI_PASSWORD=your-network-password
+   ```
+
+2. Upload the firmware with `pio run --target upload`.
+3. From any device on the same home network, open `http://milluboard.local`.
+
+Shell environment variables with the same names override `.env`, which is useful for CI or temporary networks. The build stops with an error if either value is missing. Credentials are compiled into the firmware but are never stored in tracked project files.
+
+If the ESP32 cannot join the configured network within 15 seconds, join its **MilluBoard** fallback network using password `milluboard`, then open `http://192.168.4.1`.
+
+The dashboard reports live chip status, counts unique dashboard clients active within the last 30 seconds, stores a temporary message, and toggles the common GPIO 2 onboard LED. Its experimental endpoints are:
+
+```text
+GET  /api/status
+POST /api/message   (text/plain body, 1-80 characters)
+POST /api/led
+```
 
 ## Hardware
 
