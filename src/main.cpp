@@ -199,7 +199,16 @@ void configureOta() {
 }
 
 void refreshNetworkServices() {
-  if (fallbackAccessPoint || WiFi.status() != WL_CONNECTED) return;
+  if (fallbackAccessPoint) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (networkServicesStarted) {
+      ArduinoOTA.end();
+      MDNS.end();
+      networkServicesStarted = false;
+      Serial.println("mDNS/OTA: stopped while Wi-Fi is disconnected");
+    }
+    return;
+  }
   const IPAddress currentIp = WiFi.localIP();
   if (currentIp == IPAddress(0, 0, 0, 0) ||
       (networkServicesStarted && currentIp == networkServicesIp)) return;
