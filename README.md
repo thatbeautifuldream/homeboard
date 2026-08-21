@@ -56,15 +56,26 @@ The current firmware is a standalone ESP32 dashboard. It joins the configured ho
    ```sh
    WIFI_SSID=your-network-name
    WIFI_PASSWORD=your-network-password
-   MILLUBOARD_API_TOKEN=use-a-long-random-token-here
+   API_TOKEN=use-a-long-random-token-here
    ```
 
-2. Upload the firmware with `pio run --target upload`.
+2. Upload the first firmware over USB:
+
+   ```sh
+   ./scripts/flash.py usb
+   ```
+
+   USB is only required for bootstrap or recovery. After this firmware is running on the board, use OTA flashing:
+
+   ```sh
+   ./scripts/flash.py ota
+   ```
+
 3. From any device on the same home network, open `http://milluboard.local`.
 
-Shell environment variables with the same names override `.env`, which is useful for CI or temporary networks. The build stops with an error if either value is missing. Credentials are compiled into the firmware but are never stored in tracked project files.
+Shell environment variables with the same names override `.env`, which is useful for CI or temporary networks. The build stops with an error if any required value is missing. Credentials are compiled into the firmware but are never stored in tracked project files.
 
-If the ESP32 cannot join the configured network within 15 seconds, join its **MilluBoard** fallback network using password `milluboard`, then open `http://192.168.4.1`.
+If the ESP32 cannot join the configured network within 15 seconds, join its **MilluBoard** fallback network using password `milluboard`, then open `http://192.168.4.1`. Use `./scripts/flash.py ota --host 192.168.4.1` to flash OTA while connected to the fallback network.
 
 The dashboard reports live chip status, counts unique dashboard clients active within the last 30 seconds, stores a temporary message, and toggles the common GPIO 2 onboard LED. API endpoints require a bearer token. Interactive Scalar documentation is available at `http://milluboard.local/docs`, with the OpenAPI document at `/openapi.json`.
 
@@ -77,7 +88,7 @@ POST /api/v1/led
 Send the token with every API request:
 
 ```sh
-curl -H "Authorization: Bearer $MILLUBOARD_API_TOKEN" \
+curl -H "Authorization: Bearer $API_TOKEN" \
   http://milluboard.local/api/v1/status
 ```
 

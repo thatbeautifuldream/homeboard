@@ -1,7 +1,11 @@
 #include <Arduino.h>
+#include <ArduinoOTA.h>
 #include <ESPmDNS.h>
+#include <LittleFS.h>
+#include <MD_Parola.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <time.h>
 
 #ifndef WIFI_SSID
 #error "WIFI_SSID must be supplied by the PlatformIO build environment"
@@ -10,26 +14,70 @@
 #ifndef WIFI_PASSWORD
 #error "WIFI_PASSWORD must be supplied by the PlatformIO build environment"
 #endif
-#ifndef MILLUBOARD_API_TOKEN
-#error "MILLUBOARD_API_TOKEN must be supplied by the PlatformIO build environment"
+#ifndef API_TOKEN
+#error "API_TOKEN must be supplied by the PlatformIO build environment"
 #endif
 
 namespace {
 constexpr char kDeviceName[] = "MilluBoard";
 constexpr char kHostName[] = "milluboard";
 constexpr char kAccessPointPassword[] = "milluboard";
-constexpr char kApiToken[] = MILLUBOARD_API_TOKEN;
-constexpr char kApiVersion[] = "v1";
+constexpr char kApiToken[] = API_TOKEN;
 constexpr uint8_t kLedPin = 2;
+constexpr uint8_t kMatrixDataPin = 23;  // DIN
+constexpr uint8_t kMatrixClockPin = 18; // CLK
+constexpr uint8_t kMatrixChipSelectPin = 15; // CS
+constexpr uint8_t kMatrixModuleCount = 4;
+constexpr uint32_t kMessageDisplayDurationMs = 10000;
 
 WebServer server(80);
 String boardMessage = "Hello from MilluBoard!";
+String displayTextBuffer;
+String clockTextBuffer;
 bool ledOn = false;
 bool fallbackAccessPoint = false;
+uint32_t messageDisplayUntil = 0;
+String displayedContent;
+MD_Parola matrix(MD_MAX72XX::FC16_HW, kMatrixDataPin, kMatrixClockPin,
+                 kMatrixChipSelectPin, kMatrixModuleCount);
 constexpr uint8_t kMaxDashboardClients = 8;
 constexpr uint32_t kClientActiveWindowMs = 30000;
 IPAddress dashboardClientIps[kMaxDashboardClients];
 uint32_t dashboardClientSeenAt[kMaxDashboardClients] = {};
+
+void showBoardMessage() {
+  matrix.setZone(0, 0, kMatrixModuleCount - 1);
+  displayTextBuffer = boardMessage;
+  displayedContent = displayTextBuffer;
+  matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0,
+                     PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+}
+
+void showClock() {
+  struct tm localTime;
+  char clockText[6] = "--:--";
+  if (getLocalTime(&localTime, 100)) {
+    strftime(clockText, sizeof(clockText), "%I:%M", &localTime);
+  }
+  matrix.setZone(0, 0, kMatrixModuleCount - 1);
+  clockTextBuffer = clockText;
+  displayedContent = clockTextBuffer;
+  matrix.displayText(clockTextBuffer.c_str(), PA_CENTER, 35, 0, PA_PRINT, PA_NO_EFFECT);
+}
+
+void updateDisplayContent() {
+  if (messageDisplayUntil != 0 && millis() < messageDisplayUntil) return;
+  if (messageDisplayUntil != 0) {
+    messageDisplayUntil = 0;
+    showClock();
+    return;
+  }
+  struct tm localTime;
+  if (!getLocalTime(&localTime, 0)) return;
+  char clockText[6];
+  strftime(clockText, sizeof(clockText), "%H:%M", &localTime);
+  if (displayedContent != clockText) showClock();
+}
 
 const char kPage[] PROGMEM = R"HTML(
 <!doctype html><html lang="en" class="scheme-only-dark antialiased"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#000000"><title>MilluBoard</title>
@@ -53,8 +101,9 @@ const char kPage[] PROGMEM = R"HTML(
 const $=id=>document.getElementById(id);const formatUptime=ms=>{const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m ${s%60}s`};
 function connection(ok){$('connection-text').textContent=ok?'Online':'Offline';$('connection-dot').classList.toggle('bg-white',ok);$('connection-dot').classList.toggle('bg-zinc-600',!ok)}
 const api=async(path,options={})=>{let token=localStorage.getItem('milluboard-api-token')||prompt('MilluBoard API token');if(token)localStorage.setItem('milluboard-api-token',token);const headers={...(options.headers||{}),Authorization:`Bearer ${token}`};const response=await fetch(path,{...options,headers});if(response.status===401){localStorage.removeItem('milluboard-api-token');throw Error('Unauthorized')}return response};
-async function refresh(){try{const s=await api('/api/v1/status',{cache:'no-store'}).then(r=>{if(!r.ok)throw Error();return r.json()});$('message').textContent=s.message;$('uptime').textContent=formatUptime(s.uptime_ms);$('heap').textContent=Math.round(s.free_heap/1024)+' KB';$('clients').textContent=s.clients;$('led').textContent=s.led?'On':'Off';$('led-description').textContent=s.led?'Currently on.':'Currently off.';$('led-button').setAttribute('aria-pressed',s.led);$('network-address').textContent=s.ip+' · '+s.hostname;connection(true)}catch(e){connection(false)}}
-$('refresh-button').addEventListener('click',refresh);$('message-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('message-button');button.disabled=true;$('form-status').textContent='Saving...';try{await api('/api/v1/display/message',{method:'POST',headers:{'Content-Type':'text/plain'},body:$('message-input').value});$('message-input').value='';$('form-status').textContent='Saved.';await refresh()}catch(e){$('form-status').textContent='Could not save.'}finally{button.disabled=false}});$('led-button').addEventListener('click',async()=>{await api('/api/v1/led',{method:'POST'});refresh()});refresh();setInterval(refresh,10000);
+let refreshInFlight=false;
+async function refresh(){if(refreshInFlight)return;refreshInFlight=true;const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const s=await api('/api/v1/status',{cache:'no-store',signal:controller.signal}).then(r=>{if(!r.ok)throw Error();return r.json()});$('message').textContent=s.message;$('uptime').textContent=formatUptime(s.uptime_ms);$('heap').textContent=Math.round(s.free_heap/1024)+' KB';$('clients').textContent=s.clients;$('led').textContent=s.led?'On':'Off';$('led-description').textContent=s.led?'Currently on.':'Currently off.';$('led-button').setAttribute('aria-pressed',s.led);$('network-address').textContent=s.ip+' · '+s.hostname;connection(true)}catch(e){connection(false)}finally{clearTimeout(timeout);refreshInFlight=false}}
+$('refresh-button').addEventListener('click',refresh);$('message-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('message-button');button.disabled=true;$('form-status').textContent='Saving...';try{await api('/api/v1/display/message',{method:'POST',headers:{'Content-Type':'text/plain'},body:$('message-input').value});$('message-input').value='';$('form-status').textContent='Saved.';await refresh()}catch(e){$('form-status').textContent='Could not save.'}finally{button.disabled=false}});$('led-button').addEventListener('click',async()=>{try{await api('/api/v1/led',{method:'POST'});await refresh()}catch(e){connection(false)}});refresh();setInterval(refresh,10000);
 </script></body></html>)HTML";
 
 const char kOpenApi[] PROGMEM = R"JSON({"openapi":"3.0.3","info":{"title":"MilluBoard API","version":"1.0.0","description":"Authenticated local HTTP API for MilluBoard."},"servers":[{"url":"http://milluboard.local"}],"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"API token"}},"schemas":{"MessageRequest":{"type":"string","minLength":1,"maxLength":80}}},"security":[{"bearerAuth":[]}],"paths":{"/api/v1/status":{"get":{"summary":"Get device status","responses":{"200":{"description":"Current status"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/display/message":{"post":{"summary":"Set a persistent display message","requestBody":{"required":true,"content":{"text/plain":{"schema":{"$ref":"#/components/schemas/MessageRequest"}}}},"responses":{"200":{"description":"Updated status"},"400":{"description":"Invalid message"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/led":{"post":{"summary":"Toggle the onboard LED","responses":{"200":{"description":"Updated status"},"401":{"description":"Missing or invalid token"}}}}}})JSON";
@@ -128,7 +177,15 @@ void sendJsonStatus() {
 }
 
 void configureRoutes() {
-  server.on("/", HTTP_GET, [] { server.send_P(200, "text/html", kPage); });
+  server.on("/", HTTP_GET, [] {
+    File index = LittleFS.open("/index.html", "r");
+    if (!index) {
+      server.send(500, "application/json", "{\"error\":\"index unavailable\"}");
+      return;
+    }
+    server.streamFile(index, "text/html");
+    index.close();
+  });
   server.on("/docs", HTTP_GET, [] { server.send_P(200, "text/html", kDocsPage); });
   server.on("/openapi.json", HTTP_GET, [] { server.send_P(200, "application/json", kOpenApi); });
   server.on("/api/v1/status", HTTP_GET, [] {
@@ -142,6 +199,8 @@ void configureRoutes() {
       return;
     }
     boardMessage = nextMessage;
+    messageDisplayUntil = millis() + kMessageDisplayDurationMs;
+    showBoardMessage();
     sendJsonStatus();
   });
   server.on("/api/v1/led", HTTP_POST, [] {
@@ -150,7 +209,14 @@ void configureRoutes() {
     digitalWrite(kLedPin, ledOn ? HIGH : LOW);
     sendJsonStatus();
   });
+  server.serveStatic("/", LittleFS, "/");
   server.onNotFound([] { server.send(404, "application/json", "{\"error\":\"not found\"}"); });
+}
+
+void configureOta() {
+  ArduinoOTA.setHostname(kHostName);
+  ArduinoOTA.setPassword(kApiToken);
+  ArduinoOTA.begin();
 }
 }  // namespace
 
@@ -160,7 +226,12 @@ void setup() {
   server.collectHeaders(requiredHeaders, 3);
   pinMode(kLedPin, OUTPUT);
   digitalWrite(kLedPin, LOW);
+  matrix.begin();
+  matrix.setIntensity(2);
+  matrix.displayClear();
+  showClock();
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.setHostname(kHostName);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.printf("Connecting to %s", WIFI_SSID);
@@ -175,19 +246,38 @@ void setup() {
     WiFi.mode(WIFI_AP);
     WiFi.softAP(kDeviceName, kAccessPointPassword);
   }
+  configTime(19800, 0, "pool.ntp.org", "time.nist.gov");
   const bool mdnsStarted = MDNS.begin(kHostName);
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS: mount failed");
+  }
   configureRoutes();
   server.begin();
   if (mdnsStarted) MDNS.addService("http", "tcp", 80);
+  configureOta();
   Serial.println();
   const IPAddress address = fallbackAccessPoint ? WiFi.softAPIP() : WiFi.localIP();
   Serial.println("MilluBoard playground started");
   Serial.printf("Mode: %s\n", fallbackAccessPoint ? "fallback access point" : "home Wi-Fi");
   Serial.printf("Open: http://%s.local or http://%s\n", kHostName, address.toString().c_str());
+  Serial.println("OTA: enabled");
   Serial.printf("mDNS: %s\n", mdnsStarted ? "ok" : "failed");
 }
 
 void loop() {
+  ArduinoOTA.handle();
   server.handleClient();
+  matrix.displayAnimate();
+  static uint32_t lastDisplayUpdate = 0;
+  if (millis() - lastDisplayUpdate >= 1000) {
+    lastDisplayUpdate = millis();
+    updateDisplayContent();
+  }
+  static uint32_t lastReconnectAttempt = 0;
+  if (!fallbackAccessPoint && WiFi.status() != WL_CONNECTED &&
+      millis() - lastReconnectAttempt >= 5000) {
+    lastReconnectAttempt = millis();
+    WiFi.reconnect();
+  }
   delay(2);
 }

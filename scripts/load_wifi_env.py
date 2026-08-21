@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 
-required_variables = ("WIFI_SSID", "WIFI_PASSWORD", "MILLUBOARD_API_TOKEN")
+required_variables = ("WIFI_SSID", "WIFI_PASSWORD", "API_TOKEN")
 
 
 def load_dotenv(path):
@@ -44,6 +44,6 @@ env.Append(
     CPPDEFINES=[
         ("WIFI_SSID", env.StringifyMacro(wifi_values["WIFI_SSID"])),
         ("WIFI_PASSWORD", env.StringifyMacro(wifi_values["WIFI_PASSWORD"])),
-        ("MILLUBOARD_API_TOKEN", env.StringifyMacro(wifi_values["MILLUBOARD_API_TOKEN"])),
+        ("API_TOKEN", env.StringifyMacro(wifi_values["API_TOKEN"])),
     ]
 )
