@@ -39,6 +39,7 @@ bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
 IPAddress networkServicesIp;
 uint32_t messageDisplayUntil = 0;
+bool bootBannerPending = true;
 MD_Parola matrix(MD_MAX72XX::FC16_HW, kMatrixDataPin, kMatrixClockPin,
                  kMatrixChipSelectPin, kMatrixModuleCount);
 constexpr uint8_t kMaxDashboardClients = 8;
@@ -262,8 +263,6 @@ void setup() {
   Serial.println("OTA: enabled");
   Serial.printf("mDNS: %s\n", networkServicesStarted ? "ok" : "pending");
 
-  messageDisplayUntil = millis() + kBootDisplayDurationMs;
-  showBoardMessage();
 }
 
 void loop() {
@@ -271,6 +270,11 @@ void loop() {
   server.handleClient();
   refreshNetworkServices();
   matrix.displayAnimate();
+  if (bootBannerPending) {
+    bootBannerPending = false;
+    messageDisplayUntil = millis() + kBootDisplayDurationMs;
+    showBoardMessage();
+  }
   static uint32_t lastDisplayUpdate = 0;
   if (millis() - lastDisplayUpdate >= 1000) {
     lastDisplayUpdate = millis();
