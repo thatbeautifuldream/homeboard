@@ -29,9 +29,10 @@ constexpr uint8_t kMatrixClockPin = 18; // CLK
 constexpr uint8_t kMatrixChipSelectPin = 15; // CS
 constexpr uint8_t kMatrixModuleCount = 4;
 constexpr uint32_t kMessageDisplayDurationMs = 10000;
+constexpr uint32_t kBootDisplayDurationMs = 5000;
 
 WebServer server(80);
-String boardMessage = "Hello from MilluBoard!";
+String boardMessage = "MILLU BOARD";
 String displayTextBuffer;
 bool ledOn = false;
 bool fallbackAccessPoint = false;
@@ -260,6 +261,9 @@ void setup() {
   Serial.printf("Open: http://%s.local or http://%s\n", kHostName, address.toString().c_str());
   Serial.println("OTA: enabled");
   Serial.printf("mDNS: %s\n", networkServicesStarted ? "ok" : "pending");
+
+  messageDisplayUntil = millis() + kBootDisplayDurationMs;
+  showBoardMessage();
 }
 
 void loop() {
