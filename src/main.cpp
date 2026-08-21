@@ -24,6 +24,7 @@ constexpr char kHostName[] = "milluboard";
 constexpr char kAccessPointPassword[] = "milluboard";
 constexpr char kApiToken[] = API_TOKEN;
 constexpr uint8_t kLedPin = 2;
+constexpr uint8_t kBootButtonPin = 0;
 constexpr uint8_t kMatrixDataPin = 23;  // DIN
 constexpr uint8_t kMatrixClockPin = 18; // CLK
 constexpr uint8_t kMatrixChipSelectPin = 15; // CS
@@ -35,6 +36,9 @@ WebServer server(80);
 String boardMessage = "MILLU BOARD";
 String displayTextBuffer;
 bool ledOn = false;
+bool showSeconds = false;
+bool bootButtonState = HIGH;
+uint32_t bootButtonChangedAt = 0;
 bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
 IPAddress networkServicesIp;
@@ -56,9 +60,9 @@ void showBoardMessage() {
 
 void showClock() {
   struct tm localTime;
-  char clockText[6] = "--:--";
+  char clockText[9] = "--:--";
   if (getLocalTime(&localTime, 100)) {
-    strftime(clockText, sizeof(clockText), "%I:%M", &localTime);
+    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
   displayTextBuffer = clockText;
@@ -74,9 +78,23 @@ void updateDisplayContent() {
   }
   struct tm localTime;
   if (!getLocalTime(&localTime, 0)) return;
-  char clockText[6];
-  strftime(clockText, sizeof(clockText), "%H:%M", &localTime);
+  char clockText[9];
+  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
   if (displayTextBuffer != clockText) showClock();
+}
+
+void handleBootButton() {
+  const bool pressed = digitalRead(kBootButtonPin) == LOW;
+  const bool previous = bootButtonState == LOW;
+  if (pressed == previous) return;
+  if (millis() - bootButtonChangedAt < 35) return;
+
+  bootButtonChangedAt = millis();
+  bootButtonState = pressed ? LOW : HIGH;
+  if (pressed) {
+    showSeconds = !showSeconds;
+    if (messageDisplayUntil == 0) showClock();
+  }
 }
 
 const char kOpenApi[] PROGMEM = R"JSON({"openapi":"3.0.3","info":{"title":"MilluBoard API","version":"1.0.0","description":"Authenticated local HTTP API for MilluBoard."},"servers":[{"url":"http://milluboard.local"}],"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"API token"}},"schemas":{"MessageRequest":{"type":"string","minLength":1,"maxLength":80}}},"security":[{"bearerAuth":[]}],"paths":{"/api/v1/status":{"get":{"summary":"Get device status","responses":{"200":{"description":"Current status"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/display/message":{"post":{"summary":"Set a persistent display message","requestBody":{"required":true,"content":{"text/plain":{"schema":{"$ref":"#/components/schemas/MessageRequest"}}}},"responses":{"200":{"description":"Updated status"},"400":{"description":"Invalid message"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/led":{"post":{"summary":"Toggle the onboard LED","responses":{"200":{"description":"Updated status"},"401":{"description":"Missing or invalid token"}}}}}})JSON";
@@ -235,6 +253,9 @@ void setup() {
   const char *requiredHeaders[] = {"Authorization", "Content-Type", "Content-Length"};
   server.collectHeaders(requiredHeaders, 3);
   pinMode(kLedPin, OUTPUT);
+  pinMode(kBootButtonPin, INPUT_PULLUP);
+  bootButtonState = digitalRead(kBootButtonPin);
+  bootButtonChangedAt = millis();
   digitalWrite(kLedPin, LOW);
   matrix.begin();
   matrix.setIntensity(2);
@@ -278,6 +299,7 @@ void loop() {
   server.handleClient();
   refreshNetworkServices();
   matrix.displayAnimate();
+  handleBootButton();
   if (bootBannerPending) {
     bootBannerPending = false;
     messageDisplayUntil = millis() + kBootDisplayDurationMs;
