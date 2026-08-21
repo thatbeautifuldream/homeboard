@@ -230,7 +230,6 @@ void setup() {
   matrix.begin();
   matrix.setIntensity(2);
   matrix.displayClear();
-  showClock();
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.setHostname(kHostName);
