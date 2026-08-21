@@ -39,6 +39,24 @@ bool ledOn = false;
 bool showSeconds = false;
 bool bootButtonState = HIGH;
 uint32_t bootButtonChangedAt = 0;
+
+const MD_MAX72XX::fontType_t compactClockFont[] PROGMEM = {
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  1, 0,                         // space
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, // ! through /
+  3, 0x7f, 0x41, 0x7f,          // 0
+  3, 0x00, 0x7f, 0x00,          // 1
+  3, 0x79, 0x49, 0x4f,          // 2
+  3, 0x49, 0x49, 0x7f,          // 3
+  3, 0x0f, 0x08, 0x7f,          // 4
+  3, 0x4f, 0x49, 0x79,          // 5
+  3, 0x7f, 0x49, 0x79,          // 6
+  3, 0x01, 0x01, 0x7f,           // 7
+  3, 0x7f, 0x49, 0x7f,          // 8
+  3, 0x4f, 0x49, 0x7f,          // 9
+  1, 0x24                         // colon
+};
 bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
 IPAddress networkServicesIp;
@@ -53,6 +71,7 @@ uint32_t dashboardClientSeenAt[kMaxDashboardClients] = {};
 
 void showBoardMessage() {
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
+  matrix.setFont(0, nullptr);
   displayTextBuffer = boardMessage;
   matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0,
                      PA_SCROLL_LEFT, PA_SCROLL_LEFT);
@@ -65,6 +84,7 @@ void showClock() {
     strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
+  matrix.setFont(0, showSeconds ? compactClockFont : nullptr);
   displayTextBuffer = clockText;
   matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0, PA_PRINT, PA_NO_EFFECT);
 }
