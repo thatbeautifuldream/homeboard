@@ -2,6 +2,11 @@
 
 > A tiny self-hosted display for your home.
 
+<img width="1036" height="696" alt="image" src="https://github.com/user-attachments/assets/7fd983f0-c86e-4a47-b152-4608f0f8906b" />
+
+<img width="960" height="1280" alt="WhatsApp Image 2026-08-22 at 12 18 28 AM" src="https://github.com/user-attachments/assets/7832ebaa-e9bc-4462-9bca-5aefaaf790c4" />
+
+
 Homeboard aims to turn an ESP32 and an inexpensive LED matrix into a network-connected physical status board. It will eventually be controlled through a web interface and HTTP API served directly by the ESP32, with no separate server required.
 
 Possible messages include:
