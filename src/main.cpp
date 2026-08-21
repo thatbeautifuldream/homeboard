@@ -33,13 +33,11 @@ constexpr uint32_t kMessageDisplayDurationMs = 10000;
 WebServer server(80);
 String boardMessage = "Hello from MilluBoard!";
 String displayTextBuffer;
-String clockTextBuffer;
 bool ledOn = false;
 bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
 IPAddress networkServicesIp;
 uint32_t messageDisplayUntil = 0;
-String displayedContent;
 MD_Parola matrix(MD_MAX72XX::FC16_HW, kMatrixDataPin, kMatrixClockPin,
                  kMatrixChipSelectPin, kMatrixModuleCount);
 constexpr uint8_t kMaxDashboardClients = 8;
@@ -50,7 +48,6 @@ uint32_t dashboardClientSeenAt[kMaxDashboardClients] = {};
 void showBoardMessage() {
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
   displayTextBuffer = boardMessage;
-  displayedContent = displayTextBuffer;
   matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0,
                      PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 }
@@ -62,9 +59,8 @@ void showClock() {
     strftime(clockText, sizeof(clockText), "%I:%M", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
-  clockTextBuffer = clockText;
-  displayedContent = clockTextBuffer;
-  matrix.displayText(clockTextBuffer.c_str(), PA_CENTER, 35, 0, PA_PRINT, PA_NO_EFFECT);
+  displayTextBuffer = clockText;
+  matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0, PA_PRINT, PA_NO_EFFECT);
 }
 
 void updateDisplayContent() {
@@ -78,35 +74,8 @@ void updateDisplayContent() {
   if (!getLocalTime(&localTime, 0)) return;
   char clockText[6];
   strftime(clockText, sizeof(clockText), "%H:%M", &localTime);
-  if (displayedContent != clockText) showClock();
+  if (displayTextBuffer != clockText) showClock();
 }
-
-const char kPage[] PROGMEM = R"HTML(
-<!doctype html><html lang="en" class="scheme-only-dark antialiased"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#000000"><title>MilluBoard</title>
-<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script></head>
-<body class="min-h-dvh bg-black font-sans text-white selection:bg-white selection:text-black"><main class="isolate mx-auto max-w-4xl p-5 sm:p-8 lg:py-12">
-<header class="flex items-center justify-between gap-4 border-b border-white/15 pb-5"><a href="/" aria-label="Homepage" class="min-w-0"><h1 class="truncate text-xl font-semibold tracking-tight text-balance">MilluBoard</h1></a><div class="flex shrink-0 items-center gap-2 text-base/7 sm:text-sm/6"><span id="connection-dot" class="size-2 shrink-0 rounded-full bg-white" aria-hidden="true"></span><span id="connection-text">Online</span></div></header>
-
-<section aria-label="System status" class="@container py-8 sm:py-10"><dl class="grid grid-cols-2 gap-y-8 @2xl:grid-cols-4">
-<div class="pr-4"><dt class="truncate text-base/7 font-medium text-zinc-400 sm:text-sm/6">Uptime</dt><dd id="uptime" class="pt-1 text-2xl font-semibold tracking-tight tabular-nums">—</dd></div>
-<div class="border-l border-white/15 pl-4 @2xl:px-5"><dt class="truncate text-base/7 font-medium text-zinc-400 sm:text-sm/6">Free memory</dt><dd id="heap" class="pt-1 text-2xl font-semibold tracking-tight tabular-nums">—</dd></div>
-<div class="pr-4 @2xl:border-l @2xl:border-white/15 @2xl:px-5"><dt class="truncate text-base/7 font-medium text-zinc-400 sm:text-sm/6">Connected clients</dt><dd id="clients" class="pt-1 text-2xl font-semibold tracking-tight tabular-nums">—</dd></div>
-<div class="border-l border-white/15 pl-4 @2xl:pl-5"><dt class="truncate text-base/7 font-medium text-zinc-400 sm:text-sm/6">LED</dt><dd id="led" class="pt-1 text-2xl font-semibold tracking-tight">—</dd></div>
-</dl></section>
-
-<section class="border-t border-white/15 py-8 sm:py-10"><h2 class="text-lg font-semibold">Message</h2><p id="message" class="min-h-8 pt-3 font-mono text-base/7 text-zinc-300">Loading...</p><form id="message-form" class="flex min-w-0 flex-col gap-3 pt-4 sm:max-w-xl sm:flex-row"><input id="message-input" name="message" aria-label="Board message" maxlength="80" required placeholder="Write a local message" class="min-w-0 flex-1 rounded-none border-b border-white/30 bg-transparent px-0 py-2.5 text-base/7 text-white placeholder:text-zinc-600 focus:border-white focus:outline-none sm:py-2 sm:text-sm/6"><button id="message-button" type="submit" class="rounded-md bg-white px-3 py-2.5 text-base/7 font-medium text-black ring-1 ring-white hover:bg-zinc-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white disabled:cursor-wait disabled:opacity-60 sm:py-2 sm:text-sm/6">Set message</button></form><p id="form-status" aria-live="polite" class="pt-3 text-base/7 text-zinc-500 sm:text-sm/6"></p></section>
-
-<section class="flex flex-col gap-4 border-t border-white/15 py-8 sm:flex-row sm:items-center sm:justify-between sm:py-10"><div><h2 class="text-lg font-semibold">Onboard LED</h2><p id="led-description" class="pt-1 text-base/7 text-zinc-500 sm:text-sm/6">Currently off.</p></div><button id="led-button" type="button" aria-pressed="false" class="relative rounded-md px-3 py-2.5 text-base/7 font-medium ring-1 ring-white/30 hover:bg-white hover:text-black focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white sm:py-2 sm:text-sm/6">Toggle LED<span class="pointer-fine:hidden absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2" aria-hidden="true"></span></button></section>
-
-<footer class="flex items-center justify-between gap-4 border-t border-white/15 pt-5 text-base/7 text-zinc-600 sm:text-sm/6"><p id="network-address" class="truncate font-mono">milluboard.local</p><button id="refresh-button" type="button" class="relative shrink-0 text-zinc-400 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Refresh<span class="pointer-fine:hidden absolute top-1/2 left-1/2 size-[max(100%,3rem)] -translate-1/2" aria-hidden="true"></span></button></footer></main>
-<script>
-const $=id=>document.getElementById(id);const formatUptime=ms=>{const s=Math.floor(ms/1000),d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d?`${d}d ${h}h`:h?`${h}h ${m}m`:`${m}m ${s%60}s`};
-function connection(ok){$('connection-text').textContent=ok?'Online':'Offline';$('connection-dot').classList.toggle('bg-white',ok);$('connection-dot').classList.toggle('bg-zinc-600',!ok)}
-const api=async(path,options={})=>{let token=localStorage.getItem('milluboard-api-token')||prompt('MilluBoard API token');if(token)localStorage.setItem('milluboard-api-token',token);const headers={...(options.headers||{}),Authorization:`Bearer ${token}`};const response=await fetch(path,{...options,headers});if(response.status===401){localStorage.removeItem('milluboard-api-token');throw Error('Unauthorized')}return response};
-let refreshInFlight=false;
-async function refresh(){if(refreshInFlight)return;refreshInFlight=true;const controller=new AbortController();const timeout=setTimeout(()=>controller.abort(),5000);try{const s=await api('/api/v1/status',{cache:'no-store',signal:controller.signal}).then(r=>{if(!r.ok)throw Error();return r.json()});$('message').textContent=s.message;$('uptime').textContent=formatUptime(s.uptime_ms);$('heap').textContent=Math.round(s.free_heap/1024)+' KB';$('clients').textContent=s.clients;$('led').textContent=s.led?'On':'Off';$('led-description').textContent=s.led?'Currently on.':'Currently off.';$('led-button').setAttribute('aria-pressed',s.led);$('network-address').textContent=s.ip+' · '+s.hostname;connection(true)}catch(e){connection(false)}finally{clearTimeout(timeout);refreshInFlight=false}}
-$('refresh-button').addEventListener('click',refresh);$('message-form').addEventListener('submit',async e=>{e.preventDefault();const button=$('message-button');button.disabled=true;$('form-status').textContent='Saving...';try{await api('/api/v1/display/message',{method:'POST',headers:{'Content-Type':'text/plain'},body:$('message-input').value});$('message-input').value='';$('form-status').textContent='Saved.';await refresh()}catch(e){$('form-status').textContent='Could not save.'}finally{button.disabled=false}});$('led-button').addEventListener('click',async()=>{try{await api('/api/v1/led',{method:'POST'});await refresh()}catch(e){connection(false)}});refresh();setInterval(refresh,10000);
-</script></body></html>)HTML";
 
 const char kOpenApi[] PROGMEM = R"JSON({"openapi":"3.0.3","info":{"title":"MilluBoard API","version":"1.0.0","description":"Authenticated local HTTP API for MilluBoard."},"servers":[{"url":"http://milluboard.local"}],"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"API token"}},"schemas":{"MessageRequest":{"type":"string","minLength":1,"maxLength":80}}},"security":[{"bearerAuth":[]}],"paths":{"/api/v1/status":{"get":{"summary":"Get device status","responses":{"200":{"description":"Current status"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/display/message":{"post":{"summary":"Set a persistent display message","requestBody":{"required":true,"content":{"text/plain":{"schema":{"$ref":"#/components/schemas/MessageRequest"}}}},"responses":{"200":{"description":"Updated status"},"400":{"description":"Invalid message"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/led":{"post":{"summary":"Toggle the onboard LED","responses":{"200":{"description":"Updated status"},"401":{"description":"Missing or invalid token"}}}}}})JSON";
 const char kDocsPage[] PROGMEM = R"HTML(<!doctype html><html><head><meta charset="utf-8"><title>MilluBoard API Docs</title></head><body><script id="api-reference" data-url="/openapi.json"></script><script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script></body></html>)HTML";
@@ -211,7 +180,6 @@ void configureRoutes() {
     digitalWrite(kLedPin, ledOn ? HIGH : LOW);
     sendJsonStatus();
   });
-  server.serveStatic("/", LittleFS, "/");
   server.onNotFound([] { server.send(404, "application/json", "{\"error\":\"not found\"}"); });
 }
 
