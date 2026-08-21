@@ -87,7 +87,7 @@ void showClock() {
   struct tm localTime;
   char clockText[9] = "--:--";
   if (getLocalTime(&localTime, 100)) {
-    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M%p", &localTime);
+    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M %p", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
   matrix.setFont(0, compactClockFont);
@@ -105,7 +105,7 @@ void updateDisplayContent() {
   struct tm localTime;
   if (!getLocalTime(&localTime, 0)) return;
   char clockText[9];
-  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M%p", &localTime);
+  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M %p", &localTime);
   if (displayTextBuffer != clockText) showClock();
 }
 
