@@ -84,7 +84,7 @@ void showClock() {
     strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
-  matrix.setFont(0, showSeconds ? compactClockFont : nullptr);
+  matrix.setFont(0, compactClockFont);
   displayTextBuffer = clockText;
   matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0, PA_PRINT, PA_NO_EFFECT);
 }
