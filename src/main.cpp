@@ -55,7 +55,13 @@ const MD_MAX72XX::fontType_t compactClockFont[] PROGMEM = {
   3, 0x01, 0x01, 0x7f,           // 7
   3, 0x7f, 0x49, 0x7f,          // 8
   3, 0x4f, 0x49, 0x7f,          // 9
-  1, 0x24                         // colon
+  1, 0x24,                       // colon
+  0, 0, 0, 0, 0, 0,              // ; through @
+  3, 0x7f, 0x09, 0x7f,           // A
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,             // B through L
+  3, 0x7f, 0x06, 0x7f,           // M
+  0, 0,                              // N and O
+  3, 0x7f, 0x09, 0x0f            // P
 };
 bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
@@ -81,7 +87,7 @@ void showClock() {
   struct tm localTime;
   char clockText[9] = "--:--";
   if (getLocalTime(&localTime, 100)) {
-    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
+    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M%p", &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
   matrix.setFont(0, compactClockFont);
@@ -99,7 +105,7 @@ void updateDisplayContent() {
   struct tm localTime;
   if (!getLocalTime(&localTime, 0)) return;
   char clockText[9];
-  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M", &localTime);
+  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M%p", &localTime);
   if (displayTextBuffer != clockText) showClock();
 }
 
