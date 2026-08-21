@@ -283,6 +283,7 @@ void setup() {
   }
   configureRoutes();
   server.begin();
+  server.enableDelay(false);
   refreshNetworkServices();
   Serial.println();
   const IPAddress address = fallbackAccessPoint ? WiFi.softAPIP() : WiFi.localIP();
@@ -309,5 +310,5 @@ void loop() {
     lastReconnectAttempt = millis();
     WiFi.reconnect();
   }
-  delay(2);
+  yield();
 }
