@@ -68,6 +68,13 @@ def host_resolves(host: str) -> bool:
         return False
 
 
+def source_ip_for(host: str) -> str:
+    """Return the LAN address the board can use to call the OTA client back."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.connect((host, 3232))
+        return probe.getsockname()[0]
+
+
 def ensure_usb_access(port: str) -> None:
     if os.access(port, os.R_OK | os.W_OK):
         return
@@ -94,7 +101,9 @@ def flash_ota(host: str, password: str) -> None:
         sys.executable,
         str(ESPOTA),
         "--ip", host,
+        "--host_ip", source_ip_for(host),
         "--port", "3232",
+        "--host_port", "3233",
         "--auth", password,
         "--file", str(firmware),
         "--progress",

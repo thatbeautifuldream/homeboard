@@ -36,6 +36,8 @@ String displayTextBuffer;
 String clockTextBuffer;
 bool ledOn = false;
 bool fallbackAccessPoint = false;
+bool networkServicesStarted = false;
+IPAddress networkServicesIp;
 uint32_t messageDisplayUntil = 0;
 String displayedContent;
 MD_Parola matrix(MD_MAX72XX::FC16_HW, kMatrixDataPin, kMatrixClockPin,
@@ -216,7 +218,36 @@ void configureRoutes() {
 void configureOta() {
   ArduinoOTA.setHostname(kHostName);
   ArduinoOTA.setPassword(kApiToken);
+  ArduinoOTA.setPort(3232);
+  ArduinoOTA.setTimeout(10000);
+  ArduinoOTA.onStart([] { Serial.println("OTA: update started"); });
+  ArduinoOTA.onEnd([] { Serial.println("OTA: update complete"); });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("OTA: error %u\n", static_cast<unsigned>(error));
+  });
   ArduinoOTA.begin();
+}
+
+void refreshNetworkServices() {
+  if (fallbackAccessPoint || WiFi.status() != WL_CONNECTED) return;
+  const IPAddress currentIp = WiFi.localIP();
+  if (currentIp == IPAddress(0, 0, 0, 0) ||
+      (networkServicesStarted && currentIp == networkServicesIp)) return;
+
+  if (networkServicesStarted) {
+    ArduinoOTA.end();
+    MDNS.end();
+  }
+  if (!MDNS.begin(kHostName)) {
+    networkServicesStarted = false;
+    Serial.println("mDNS: start failed; will retry");
+    return;
+  }
+  MDNS.addService("http", "tcp", 80);
+  configureOta();
+  networkServicesIp = currentIp;
+  networkServicesStarted = true;
+  Serial.printf("mDNS/OTA: active at %s (%s)\n", kHostName, currentIp.toString().c_str());
 }
 }  // namespace
 
@@ -247,26 +278,25 @@ void setup() {
     WiFi.softAP(kDeviceName, kAccessPointPassword);
   }
   configTime(19800, 0, "pool.ntp.org", "time.nist.gov");
-  const bool mdnsStarted = MDNS.begin(kHostName);
   if (!LittleFS.begin(true)) {
     Serial.println("LittleFS: mount failed");
   }
   configureRoutes();
   server.begin();
-  if (mdnsStarted) MDNS.addService("http", "tcp", 80);
-  configureOta();
+  refreshNetworkServices();
   Serial.println();
   const IPAddress address = fallbackAccessPoint ? WiFi.softAPIP() : WiFi.localIP();
   Serial.println("MilluBoard playground started");
   Serial.printf("Mode: %s\n", fallbackAccessPoint ? "fallback access point" : "home Wi-Fi");
   Serial.printf("Open: http://%s.local or http://%s\n", kHostName, address.toString().c_str());
   Serial.println("OTA: enabled");
-  Serial.printf("mDNS: %s\n", mdnsStarted ? "ok" : "failed");
+  Serial.printf("mDNS: %s\n", networkServicesStarted ? "ok" : "pending");
 }
 
 void loop() {
   ArduinoOTA.handle();
   server.handleClient();
+  refreshNetworkServices();
   matrix.displayAnimate();
   static uint32_t lastDisplayUpdate = 0;
   if (millis() - lastDisplayUpdate >= 1000) {
