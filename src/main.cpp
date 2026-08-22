@@ -37,6 +37,7 @@ String boardMessage = "MILLU BOARD";
 String displayTextBuffer;
 bool ledOn = false;
 bool showSeconds = false;
+bool showAmPm = true;
 bool bootButtonState = HIGH;
 uint32_t bootButtonChangedAt = 0;
 
@@ -83,11 +84,16 @@ void showBoardMessage() {
                      PA_SCROLL_LEFT, PA_SCROLL_LEFT);
 }
 
+const char *clockFormat() {
+  if (showSeconds) return "%I:%M:%S";
+  return showAmPm ? "%I:%M %p" : "%I:%M";
+}
+
 void showClock() {
   struct tm localTime;
   char clockText[9] = "--:--";
   if (getLocalTime(&localTime, 100)) {
-    strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M %p", &localTime);
+    strftime(clockText, sizeof(clockText), clockFormat(), &localTime);
   }
   matrix.setZone(0, 0, kMatrixModuleCount - 1);
   matrix.setFont(0, compactClockFont);
@@ -105,7 +111,7 @@ void updateDisplayContent() {
   struct tm localTime;
   if (!getLocalTime(&localTime, 0)) return;
   char clockText[9];
-  strftime(clockText, sizeof(clockText), showSeconds ? "%I:%M:%S" : "%I:%M %p", &localTime);
+  strftime(clockText, sizeof(clockText), clockFormat(), &localTime);
   if (displayTextBuffer != clockText) showClock();
 }
 
@@ -189,6 +195,8 @@ void sendJsonStatus() {
   json += F(",\"network_mode\":\""); json += fallbackAccessPoint ? F("access_point") : F("home_wifi"); json += '"';
   json += F(",\"ip\":\""); json += fallbackAccessPoint ? WiFi.softAPIP().toString() : WiFi.localIP().toString(); json += '"';
   json += F(",\"led\":"); json += ledOn ? F("true") : F("false");
+  json += F(",\"clock_seconds\":"); json += showSeconds ? F("true") : F("false");
+  json += F(",\"clock_ampm\":"); json += showAmPm ? F("true") : F("false");
   json += '}';
   server.send(200, "application/json", json);
 }
@@ -224,6 +232,28 @@ void configureRoutes() {
     if (!authorized()) return;
     ledOn = !ledOn;
     digitalWrite(kLedPin, ledOn ? HIGH : LOW);
+    sendJsonStatus();
+  });
+  server.on("/api/v1/clock/seconds", HTTP_POST, [] {
+    if (!authorized()) return;
+    const String value = server.arg("plain");
+    if (value != "true" && value != "false") {
+      server.send(400, "application/json", "{\"error\":\"body must be true or false\"}");
+      return;
+    }
+    showSeconds = value == "true";
+    if (messageDisplayUntil == 0) showClock();
+    sendJsonStatus();
+  });
+  server.on("/api/v1/clock/ampm", HTTP_POST, [] {
+    if (!authorized()) return;
+    const String value = server.arg("plain");
+    if (value != "true" && value != "false") {
+      server.send(400, "application/json", "{\"error\":\"body must be true or false\"}");
+      return;
+    }
+    showAmPm = value == "true";
+    if (messageDisplayUntil == 0) showClock();
     sendJsonStatus();
   });
   server.onNotFound([] { server.send(404, "application/json", "{\"error\":\"not found\"}"); });
