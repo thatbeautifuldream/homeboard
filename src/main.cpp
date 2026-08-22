@@ -256,6 +256,18 @@ void configureRoutes() {
     if (messageDisplayUntil == 0) showClock();
     sendJsonStatus();
   });
+  server.on("/api/v1/clock/mode", HTTP_POST, [] {
+    if (!authorized()) return;
+    const String value = server.arg("plain");
+    if (value != "seconds" && value != "ampm") {
+      server.send(400, "application/json", "{\"error\":\"mode must be seconds or ampm\"}");
+      return;
+    }
+    showSeconds = value == "seconds";
+    showAmPm = !showSeconds;
+    if (messageDisplayUntil == 0) showClock();
+    sendJsonStatus();
+  });
   server.onNotFound([] { server.send(404, "application/json", "{\"error\":\"not found\"}"); });
 }
 
