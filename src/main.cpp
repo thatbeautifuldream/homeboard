@@ -30,7 +30,7 @@ constexpr uint8_t kMatrixClockPin = 18; // CLK
 constexpr uint8_t kMatrixChipSelectPin = 15; // CS
 constexpr uint8_t kMatrixModuleCount = 4;
 constexpr uint32_t kMessageDisplayDurationMs = 10000;
-constexpr uint32_t kBootDisplayDurationMs = 5000;
+constexpr uint8_t kMaxMessageLoops = 5;
 
 WebServer server(80);
 String boardMessage = "MILLU BOARD";
@@ -68,6 +68,7 @@ bool fallbackAccessPoint = false;
 bool networkServicesStarted = false;
 IPAddress networkServicesIp;
 uint32_t messageDisplayUntil = 0;
+uint8_t messageLoopsRemaining = 0;
 bool bootBannerPending = true;
 MD_Parola matrix(MD_MAX72XX::FC16_HW, kMatrixDataPin, kMatrixClockPin,
                  kMatrixChipSelectPin, kMatrixModuleCount);
@@ -82,6 +83,12 @@ void showBoardMessage() {
   displayTextBuffer = boardMessage;
   matrix.displayText(displayTextBuffer.c_str(), PA_CENTER, 35, 0,
                      PA_SCROLL_LEFT, PA_SCROLL_LEFT);
+}
+
+void startBoardMessage(uint8_t loops) {
+  messageLoopsRemaining = loops;
+  messageDisplayUntil = millis() + kMessageDisplayDurationMs;
+  showBoardMessage();
 }
 
 const char *clockFormat() {
@@ -102,6 +109,7 @@ void showClock() {
 }
 
 void updateDisplayContent() {
+  if (messageLoopsRemaining > 0) return;
   if (messageDisplayUntil != 0 && millis() < messageDisplayUntil) return;
   if (messageDisplayUntil != 0) {
     messageDisplayUntil = 0;
@@ -127,6 +135,28 @@ void handleBootButton() {
     showSeconds = !showSeconds;
     if (messageDisplayUntil == 0) showClock();
   }
+}
+
+bool parseMessageRequest(String &message, uint8_t &loops) {
+  const String body = server.arg("plain");
+  const String contentType = server.header("Content-Type");
+  if (contentType == "text/plain") {
+    message = body;
+    loops = 1;
+    return message.length() >= 1 && message.length() <= 80;
+  }
+  if (!contentType.startsWith("application/json")) return false;
+
+  const int messageKey = body.indexOf("\"message\"");
+  const int messageStart = body.indexOf('"', body.indexOf(':', messageKey) + 1);
+  const int messageEnd = body.indexOf('"', messageStart + 1);
+  const int loopsKey = body.indexOf("\"loops\"");
+  if (messageKey < 0 || messageStart < 0 || messageEnd < 0 || loopsKey < 0) return false;
+  message = body.substring(messageStart + 1, messageEnd);
+  int loopsStart = body.indexOf(':', loopsKey) + 1;
+  while (loopsStart < static_cast<int>(body.length()) && body[loopsStart] == ' ') loopsStart++;
+  loops = static_cast<uint8_t>(body.substring(loopsStart).toInt());
+  return message.length() >= 1 && message.length() <= 80 && loops >= 1 && loops <= kMaxMessageLoops;
 }
 
 const char kOpenApi[] PROGMEM = R"JSON({"openapi":"3.0.3","info":{"title":"MilluBoard API","version":"1.0.0","description":"Authenticated local HTTP API for MilluBoard."},"servers":[{"url":"http://milluboard.local"}],"components":{"securitySchemes":{"bearerAuth":{"type":"http","scheme":"bearer","bearerFormat":"API token"}},"schemas":{"MessageRequest":{"type":"string","minLength":1,"maxLength":80}}},"security":[{"bearerAuth":[]}],"paths":{"/api/v1/status":{"get":{"summary":"Get device status","responses":{"200":{"description":"Current status"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/display/message":{"post":{"summary":"Set a persistent display message","requestBody":{"required":true,"content":{"text/plain":{"schema":{"$ref":"#/components/schemas/MessageRequest"}}}},"responses":{"200":{"description":"Updated status"},"400":{"description":"Invalid message"},"401":{"description":"Missing or invalid token"}}}},"/api/v1/led":{"post":{"summary":"Toggle the onboard LED","responses":{"200":{"description":"Updated status"},"401":{"description":"Missing or invalid token"}}}}}})JSON";
@@ -197,6 +227,7 @@ void sendJsonStatus() {
   json += F(",\"led\":"); json += ledOn ? F("true") : F("false");
   json += F(",\"clock_seconds\":"); json += showSeconds ? F("true") : F("false");
   json += F(",\"clock_ampm\":"); json += showAmPm ? F("true") : F("false");
+  json += F(",\"message_loops\":"); json += messageLoopsRemaining;
   json += '}';
   server.send(200, "application/json", json);
 }
@@ -219,13 +250,13 @@ void configureRoutes() {
   server.on("/api/v1/display/message", HTTP_POST, [] {
     if (!authorized()) return;
     String nextMessage;
-    if (!validTextBody(nextMessage)) {
-      server.send(400, "application/json", "{\"error\":\"message must contain 1-80 characters\"}");
+    uint8_t loops = 1;
+    if (!parseMessageRequest(nextMessage, loops)) {
+      server.send(400, "application/json", "{\"error\":\"use text/plain or JSON {message,loops}; message 1-80 chars, loops 1-5\"}");
       return;
     }
     boardMessage = nextMessage;
-    messageDisplayUntil = millis() + kMessageDisplayDurationMs;
-    showBoardMessage();
+    startBoardMessage(loops);
     sendJsonStatus();
   });
   server.on("/api/v1/led", HTTP_POST, [] {
@@ -366,12 +397,16 @@ void loop() {
   ArduinoOTA.handle();
   server.handleClient();
   refreshNetworkServices();
-  matrix.displayAnimate();
+  const bool messageFinished = matrix.displayAnimate();
+  if (messageFinished && messageLoopsRemaining > 0) {
+    messageLoopsRemaining--;
+    if (messageLoopsRemaining > 0) showBoardMessage();
+    else messageDisplayUntil = millis();
+  }
   handleBootButton();
   if (bootBannerPending) {
     bootBannerPending = false;
-    messageDisplayUntil = millis() + kBootDisplayDurationMs;
-    showBoardMessage();
+    startBoardMessage(1);
   }
   static uint32_t lastDisplayUpdate = 0;
   if (millis() - lastDisplayUpdate >= 1000) {
